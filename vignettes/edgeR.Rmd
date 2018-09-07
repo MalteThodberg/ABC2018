@@ -1,0 +1,288 @@
+---
+title: "Introduction to edgeR"
+author: "Malte Thodberg"
+date: "`r Sys.Date()`"
+output:
+  ioslides_presentation:
+    smaller: true
+    highlight: tango
+    transition: faster
+vignette: >
+  %\VignetteEngine{knitr::knitr}
+  %\VignetteIndexEntry{EDA}
+  %\usepackage[UTF-8]{inputenc}
+---
+
+## Introduction
+
+This presentation will show the basic usage of edgeR:
+
+- Normalization.
+- Dispersion estimate.
+- Fitting GLMs.
+- Testing coefficients and contrasts.
+- Testing the results.
+
+```{r}
+# Load the data
+library(ABC2018)
+library(ggplot2)
+theme_set(theme_minimal())
+library(edgeR)
+data("zebrafish")
+```
+
+## Trimming and normalizing the data.
+
+Just as before, we started by loading, trimming and normalizing the data:
+
+```{r}
+# Trim 
+EM_zebra <- subset(zebrafish$Expression, rowSums(zebrafish$Expression >= 5) >= 3)
+
+# Calculate normalization factors
+dge_zebra <- DGEList(EM_zebra)
+dge_zebra <- calcNormFactors(dge_zebra, method="TMM")
+```
+
+## Building the model matrix
+
+We use `model.matrix` to make a simple model matrix:
+
+```{r}
+mod <- model.matrix(~gallein, data=zebrafish$Design)
+mod
+```
+
+## Estimating the dispersion
+
+Now we move on to estimating dispersion or BCV:
+
+```{r}
+disp_zebra <- estimateDisp(dge_zebra, design=mod, robust=TRUE)
+```
+
+The 3-step estimation is all done by a single function in the newest version of edgeR: `estimateDisp`, which replaces the three previous functions of 
+
+- `estimateCommonDisp`
+- `estimateTrendedDisp`
+- `estimateTagwiseDisp`
+
+## Plotting the dispersion
+
+We can then plot the estimates:
+```{r}
+plotBCV(y=disp_zebra)
+```
+
+## Fiting gene-wise GLMs and testing a coefficient.
+
+Now we can fit gene-wise GLMs:
+
+```{r}
+fit_zebra <- glmFit(disp_zebra, design=mod)
+```
+
+Finally, we can test a coefficient in the model for DE:
+
+```{r}
+# Using the name of the coefficient
+gallein <- glmLRT(fit_zebra, coef="galleintreated")
+
+# Using the index of the coefficient
+gallein <- glmLRT(fit_zebra, coef=2)
+```
+
+## Inspecting the results
+
+edgeR has several useful functions for inspecting and plotting the results:
+
+Inspecting the top hits with `topTags`:
+
+```{r}
+topTags(gallein)
+```
+
+## Inspecting the results
+
+Summarize the number of up- and down-regulated genes with `decideTestsDGE`:
+
+```{r}
+is_de <- decideTestsDGE(gallein, p.value=0.1)
+head(is_de)
+summary(is_de)
+```
+
+## Inspecting the results
+
+MA-plot, showing relation between mean expression and logFC, :
+```{r}
+plotSmear(gallein, de.tags=rownames(gallein)[is_de != 0])
+```
+
+## Inspecting the results
+
+There is no built-in function for making a volcano plot, but it's easy to do yourself:
+```{r, tidy=TRUE}
+plot(-log10(PValue)~logFC, data=topTags(gallein, n=Inf, sort.by = "none"), col=factor(decideTestsDGE(gallein) != 0), pch=16)
+```
+
+## Quasi-likelihood: Fitting models
+
+Recently, edgeR introduced an alternative DE pipeline using Quasi-likelihood. It should be slightly more conservative than the standard edgeR pipeline. Code-wise, though, they are almost identical:
+
+```{r}
+fitQL <- glmQLFit(y=disp_zebra, design=mod, robust=TRUE)
+galleinQL <- glmQLFTest(fitQL, coef="galleintreated")
+summary(decideTestsDGE(galleinQL, p.value=0.1))
+```
+
+## Quasi-likehood: Plotting dispersions
+
+The QL-pipeline estimates slightly different dispersions:
+
+```{r}
+plotQLDisp(fitQL)
+```
+
+## Final exercises:
+
+Use the above code as a template for conducting your own analysis. For the `pasilla` dataset:
+
+- Load, trim and normalize the data
+- Inspect the study design, and decide on a model matrix to use with edgeR
+- Use edgeR to estimate dispersions and fit gene-wise GLMs
+- Report the number of up- and down-regulated genes for the tests of interests
+- Generate smear and volcano plots summarizing the analysis.
+- Does the number of DE genes change when you model the batch effect or not?
+
+If you have time:
+
+- Investigate the effect of different normalization methods on the number of DE genes.
+- Try out the QL-pipeline by replacing `glmFit` with `glmQLFit` and `glmLRT` with `glmQLFTest`
+
+Once again - the next couple of slides contain cheat sheets...
+
+## Cheatsheet: Experimenting with model matrices
+
+```{r}
+# Load the data
+data("pasilla")
+
+# This will makes "treated the intercept!"
+mod <- model.matrix(~condition, data=pasilla$Design)
+mod
+```
+
+## Cheatsheet: Experimenting with model matrices
+
+```{r}
+# Relevel to make "untreated" intercept
+pasilla$Design$condition <- relevel(pasilla$Design$condition, "untreated")
+mod <- model.matrix(~condition, data=pasilla$Design)
+mod
+```
+
+## Cheatsheet: Experimenting with model matrices
+
+```{r}
+# Relevel to make "untreated" intercept
+pasilla$Design$condition <- relevel(pasilla$Design$condition, "untreated")
+mod_batch <- model.matrix(~condition+type, data=pasilla$Design)
+mod_batch
+```
+
+## Cheatsheet: Fitting the models
+
+Fit and test model without batch correction:
+```{r}
+# Trim 
+EM <- subset(pasilla$Expression, rowSums(pasilla$Expression >= 5) >= 3)
+
+# Calculate normalization factors
+dge <- calcNormFactors(DGEList(EM), method="TMM")
+
+# Calculate dispersion
+disp <- estimateDisp(dge, design=mod, robust=TRUE)
+
+# Fit models
+fit <- glmFit(disp, design=mod)
+
+# Perform the test of the given coefficient
+res <- glmLRT(fit, coef="conditiontreated")
+```
+
+## Cheatsheet: Fitting the models
+
+Fit and test model without batch correction:
+
+```{r}
+# Calculate dispersion
+disp_batch <- estimateDisp(dge, design=mod_batch, robust=TRUE)
+
+# Fit models
+fit_batch <- glmFit(disp_batch, design=mod_batch)
+
+# Perform the test of the given coefficient
+res_batch <- glmLRT(fit_batch, coef="conditiontreated")
+```
+
+## Cheatsheet: Inspecting the results
+
+Plot dispersions
+```{r}
+par(mfrow=c(1,2))
+plotBCV(disp)
+plotBCV(disp_batch)
+```
+
+## Cheatsheet: Inspecting the results
+
+Number of DE genes
+```{r}
+summary(decideTestsDGE(res))
+summary(decideTestsDGE(res_batch))
+```
+
+## Cheatsheet: Inspecting the results
+
+Top genes
+```{r}
+topTags(res)
+topTags(res_batch)
+```
+
+## Cheatsheet: Inspecting the results
+
+MA-plots:
+```{r}
+par(mfrow=c(1,2))
+plotSmear(res_batch, de.tags=rownames(res)[decideTestsDGE(res) != 0])
+plotSmear(res_batch, de.tags=rownames(res_batch)[decideTestsDGE(res_batch) != 0])
+```
+
+## Cheatsheet: Inspecting the results
+
+Volcano plots:
+```{r, tidy=TRUE}
+par(mfrow=c(1,2))
+plot(-log10(PValue)~logFC, data=topTags(res, n=Inf, sort.by = "none"), col=factor(decideTestsDGE(res) != 0), pch=16)
+plot(-log10(PValue)~logFC, data=topTags(res_batch, n=Inf, sort.by = "none"), col=factor(decideTestsDGE(res_batch) != 0), pch=16)
+```
+
+## Cheatsheet: Quasi-likehood
+
+Trying the more conservative QL-pipeline
+```{r}
+fitQL_batch <- glmQLFit(y=disp_batch, design=mod_batch, robust=TRUE)
+testQL_batch <- glmQLFTest(fitQL_batch, coef=2)
+summary(decideTestsDGE(testQL_batch, p.value=0.05))
+```
+
+## Cheatsheet: Quasi-likehood
+
+The QL-pipeline estimates slightly different dispersions:
+
+```{r}
+plotQLDisp(fitQL)
+```

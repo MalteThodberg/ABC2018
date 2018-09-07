@@ -1,0 +1,426 @@
+---
+title: "Exploratory Data Analysis (EDA)"
+author: "Malte Thodberg"
+date: "`r Sys.Date()`"
+output:
+  ioslides_presentation:
+    smaller: true
+    highlight: tango
+    transition: faster
+vignette: >
+  %\VignetteEngine{knitr::knitr}
+  %\VignetteIndexEntry{EDA}
+  %\usepackage[UTF-8]{inputenc}
+---
+
+## Introduction
+
+This presentation will provide a short introduction to different ways of visualizing a genomics dataset:
+
+Dimensionality reductions (projections)
+
+- PCA
+- LDA and PLSDA (Supervised methods)
+- MDS
+- Heatmaps (including hierachical clustering)
+
+## Setup
+
+Packages:
+```{r}
+library(ABC2018)
+library(ggplot2)
+theme_set(theme_bw())
+library(RColorBrewer)
+library(pheatmap)
+library(edgeR)
+
+data(zebrafish)
+```
+
+## Setup
+
+We start from the trimmed and normalized EM from before:
+```{r}
+# Trim
+above_one <- rowSums(zebrafish$Expression > 1)
+trimmed_em <- subset(zebrafish$Expression, above_one > 3)
+
+# Normalize
+dge <- DGEList(trimmed_em)
+dge <- calcNormFactors(object=dge, method="TMM")
+EM <- cpm(y=dge, log=TRUE)
+```
+
+# Principal Components Anaysis (PCA)
+
+## PCA
+
+You already know PCA from BoHTA. PCA decomposes the (scaled) EM into principle components representing orthogonal rotations that maximizes total variance. 
+
+This is a powerful way of visualizing data since it will highlight the major but mutually exclusive patterns, as well as quantifiying the contribution of each pattern to the total through explained variance of the components.
+
+PCA in R is simple (Recap from BoHTA): 
+```{r}
+# Perfrom PCA
+pca <- prcomp(x=t(EM), scale=TRUE, center=TRUE)
+
+# Inspect components
+summary(pca)
+```
+
+## PCA
+
+```{r}
+ggplot(data.frame(pca$x, zebrafish$Design), aes(x=PC1, y=PC2, 
+                            color=gallein, label=rownames(zebrafish$Design))) +
+    geom_text()
+```
+
+## PCA
+
+```{r}
+ggplot(data.frame(pca$x, zebrafish$Design), aes(x=PC1, y=PC3, 
+                            color=gallein, label=rownames(zebrafish$Design))) +
+    geom_text()
+```
+
+# Heatmaps
+
+## Aim
+
+Heatmaps are classic way of visulizaing datasets as a clustered matrix with color-reprensentation of magnitude.
+
+In addition to visualization of the EM, it also features row and column wise hierachical clusterings, and can be further annotated with groupings along the margins.
+
+Heatmaps are normally most useful for small dataset, otherwise rows, columns and trees tend to get smeared.
+
+A way to get around this is to group genes prior to plotting, which allows for plotting of much bigger data but loosing resolution of individual features.
+
+## Heatmap of large datasets
+```{r, eval=FALSE}
+pheatmap(mat=EM, annotation_col=zebrafish$Design, scale="row")
+# Running this takes waaaaay to long!
+```
+
+## Heatmap of large datasets
+```{r, tidy=TRUE}
+pheatmap(mat=EM, kmeans_k=10, annotation_col=zebrafish$Design, scale="row")
+```
+
+## Heatmap of large datasets
+```{r, tidy=TRUE}
+pheatmap(mat=EM, kmeans_k=100, annotation_col=zebrafish$Design, scale="row")
+```
+
+## Heatmap of large datasets
+```{r, tidy=TRUE}
+pheatmap(mat=EM, kmeans_k=1000, annotation_col=zebrafish$Design, scale="row")
+```
+
+# Distance matrices
+
+## Aim
+
+In many cases we are not (yet) interested in individual genes or clusters, but only on how the samples are different.
+
+A simple way a quantifiying this is to calculate the distance (i.e. euclidian distance) between samples, and plot these values in a heatmap.
+
+Following is examples of doing this. Let's first define the distances:
+```{r}
+# Transpose for samples-wise distances
+distmat <- dist(t(EM))
+distmat
+```
+
+## Heatmap of distance matrix
+```{r, tidy=TRUE}
+pheatmap(mat=as.matrix(distmat), color=brewer.pal(name="RdPu", n=9), clustering_distance_rows=distmat, clustering_distance_cols=distmat, annotation_col=zebrafish$Design, annotation_row=zebrafish$Design)
+```
+
+# Multi-Dimensional Scaling (MDS)
+
+## Aim
+
+We can view the distance matrix as a new high-dimensional space, where measurements are now distances to other samples.
+
+This means we can use dimensionality reduction to try an represent the distance matrix in fewer dimensions!
+
+Multi-Dimensional Scaling finds a low-dimensional representation (usually 2D) of a high-dimensional distance matrix, preserving the distances between samples as best as possible.
+
+Let's see how this works first by using the example data `UScitiesD`!
+
+## MDS: Small example
+
+The UScitiesD is `dist` object holding distances between 9 major US cities:
+
+```{r, tidy=TRUE}
+class(UScitiesD)
+UScitiesD
+```
+
+## MDS: Small example
+
+We can use `cmdscale` function to reduce the dimensionality of the distance matrix:
+
+```{r, tidy=TRUE}
+# Call cmdscale
+mds <- cmdscale(UScitiesD, k=2)
+mds
+```
+
+We can then easily plot this 2D representation: How does it look?
+
+## MDS: Small example
+
+```{r, tidy=TRUE}
+ggplot(as.data.frame(mds), aes(x=V1, y=V2, label=rownames(mds))) + geom_text()
+```
+
+## MDS: Real example
+
+Let's use the distance matrix from before and do MDS:
+
+```{r, tidy=TRUE}
+mds <- cmdscale(distmat, k=2)
+```
+
+How does the plot look compared to the PCA-plot?
+
+## MDS: Real example
+
+```{r, tidy=TRUE}
+ggplot(data.frame(mds, zebrafish$Design), aes(x=X1, y=X2, color=gallein,
+                                              label=rownames(mds))) + geom_text()
+```
+
+## MDS: edgeR and limma
+
+One of the advantages of MDS is that the distance matrix can be calculated in any way possible. While it might not always be possible to do PCA (i.e. missing values), it is usually possible to define some distance measure between samples.
+
+MDS is the built-in visualization method in limma and edgeR, where distances are calculated in a different way:
+
+Instead of calculating distance based on all genes, it only used top _N_ features: Either defined by overall differences or pairwise differences.
+
+This goes back to the assumption that most genes are not changing, and therefore there's little to gain in including them in the analysis.
+
+## MDS: edgeR and limma
+
+`plotMDS` will do all the work for us (can also be called directly on a `DGEList`):
+
+```{r, tidy=TRUE}
+plotMDS(EM, top=1000)
+```
+
+## MDS: edgeR and limma
+
+The same plot, but using far fewer features:
+
+```{r, tidy=TRUE}
+plotMDS(EM, top=10)
+```
+
+# Supervised projections
+
+## Aim
+
+So far we have look at unsupervised projections: We have not taken anything known about the samples into account.
+
+Another approach is supervised projections, where we try to create a low-dimensional representation that best captures differences between our known groups.
+
+A popular methods for this is Linear Discriminant Analysis (LDA). Unfortunately, LDA runs into problems with genomics data due to high multi-colinearity of variables.
+
+limma has a version of LDA for high-dimensional data that implements a few tricks to get around this issue. Again, this method uses only a subset of top genes.
+
+It should be noted though, that supervised projections almost always produce nicely looking plots (due to the high number of input features). That means they should be interpretated with extra caution!
+
+## LDA in limma
+
+We will get back to what many of these settings mean!
+```{r, tidy=TRUE}
+plotRLDF(EM, nprobes=100, labels.y=zebrafish$Design$gallein, trend=TRUE, robust=TRUE)
+```
+
+## PLSDA
+
+For those interested, another (more general, but much slower) alternative to LDA for genomics data is Partial Least Squares Discriminant Analysis (PLSDA):
+
+```{r, tidy=TRUE}
+# Perfrom PLSDA
+plsda <- DiscriMiner::plsDA(variables=scale(t(EM)), group=zebrafish$Design$gallein, autosel=FALSE, comps=2)
+
+# Lots of output, we are interested in the components
+summary(plsda)
+```
+
+## PLSDA
+```{r}
+ggplot(data.frame(plsda$components, zebrafish$Design), aes(x=t1, y=t2, 
+        color=gallein, label=rownames(zebrafish$Design))) + geom_text()
+```
+
+## Exercise
+
+Your exercise now is to perform EDA on the other datasets in `ABC2018`:
+```{r}
+data(pasilla)
+```
+
+Try to have a look at:
+
+- Normalization
+- Run PCA and MDS: Do they look similar?
+- Run LDA: How does this look compared to the unsupervised methods:
+
+If you are super quick, you can also have a look at a much more complex dataset:
+```{r}
+data(tissues)
+```
+
+Can you spot some issues with this dataset?
+
+The next couple of slides have some possible solutions.
+
+# Cheat Sheet
+
+## Pasilla dataset: Normalization
+
+Trim and normalize
+```{r}
+# Trim
+above_one <- rowSums(pasilla$Expression > 1)
+trimmed_em <- subset(pasilla$Expression, above_one > 3)
+
+# Normalize
+dge <- DGEList(trimmed_em)
+dge <- calcNormFactors(object=dge, method="TMM")
+EM <- cpm(y=dge, log=TRUE)
+```
+
+## Pasilla dataset: Normalization
+
+Inspect normalization:
+```{r}
+plotDensities(EM)
+```
+
+## Pasilla dataset: PCA
+
+PCA on all genes
+```{r}
+# Perfrom PCA
+pca <- prcomp(x=t(EM), scale=TRUE, center=TRUE)
+
+# Save data for plotting
+P <- data.frame(pasilla$Design, pca$x)
+
+# Inspect components
+summary(pca)
+```
+
+## Pasilla dataset: PCA
+
+```{r}
+qplot(data=P, x=PC1, y=PC2, geom=c("text"), 
+			color=type, label=rownames(P))
+```
+
+## Pasilla dataset: PCA
+
+```{r}
+qplot(data=P, x=PC1, y=PC2, geom=c("text"), 
+			color=condition, label=rownames(P))
+```
+
+## Pasilla dataset: MDS
+
+MDS using only a few genes
+```{r}
+# Perform MDS, but only save output
+mds <-plotMDS(EM, top=100, gene.selection="common", plot=FALSE)
+
+# Save as a data.frame
+P <- data.frame(pasilla$Design, mds$cmdscale.out)
+```
+
+## Pasilla dataset: MDS
+
+```{r}
+qplot(data=P, x=X1, y=X2, geom=c("text"), 
+			color=type, label=rownames(P))
+```
+
+## Pasilla dataset: MDS
+
+```{r}
+qplot(data=P, x=X1, y=X2, geom=c("text"), 
+			color=condition, label=rownames(P))
+```
+
+## Pasilla dataset: LDA
+
+Supervised projection:
+```{r, tidy=TRUE}
+# LDF with only 100 genes
+ldf <- plotRLDF(EM, nprobes=100, labels.y=pasilla$Design$condition, trend=TRUE, robust=TRUE, plot = FALSE)
+
+# Save as a data.frame
+P <- data.frame(pasilla$Design, ldf$training)
+```
+
+## Pasilla dataset: LDA
+
+```{r}
+qplot(data=P, x=X1, y=X2, geom=c("text"), 
+			color=type, label=rownames(P))
+```
+
+## Pasilla dataset: LDA
+
+```{r}
+qplot(data=P, x=X1, y=X2, geom=c("text"), 
+			color=condition, label=rownames(P))
+```
+
+## Tissues dataset: Normalization
+
+Trim and normalize
+```{r}
+# Trim
+above_one <- rowSums(tissues$Expression > 2)
+trimmed_em <- subset(tissues$Expression, above_one > 3)
+
+# Normalize
+dge <- DGEList(trimmed_em)
+dge <- calcNormFactors(object=dge, method="TMM")
+EM <- cpm(y=dge, log=TRUE)
+```
+
+## Tissues dataset: Normalization
+
+Inspect normalization:
+```{r}
+plotDensities(EM, legend = FALSE)
+```
+
+## Tissues dataset: PCA
+
+PCA on all genes
+```{r}
+# Perfrom PCA
+pca <- prcomp(x=t(EM), scale=TRUE, center=TRUE)
+
+# Save data for plotting
+P <- data.frame(tissues$Design, pca$x)
+
+# Inspect components
+summary(pca)
+```
+
+## Tissues dataset: PCA
+
+```{r}
+qplot(data=P, x=PC1, y=PC2, geom="text", 
+			color=gender, label=tissue.type)
+```
+
